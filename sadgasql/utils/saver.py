@@ -24,7 +24,7 @@ def load_checkpoint(item_dict, model_dir, map_location=None, step=None):
     if step is not None:
         path += f'-{step:08d}'
     if os.path.exists(path):
-        print("Loading model from %s" % path)
+        print(f"Loading model from {path}")
         checkpoint = torch.load(path, map_location=map_location)
 
         old_state_dict = item_dict["model"].state_dict()
@@ -40,7 +40,7 @@ def load_checkpoint(item_dict, model_dir, map_location=None, step=None):
 
 def load_and_map_checkpoint(model, model_dir, remap):
     path = os.path.join(model_dir, 'model_checkpoint')
-    print("Loading parameters %s from %s" % (remap.keys(), model_dir))
+    print(f"Loading parameters {remap.keys()} from {model_dir}")
     checkpoint = torch.load(path)
     new_state_dict = model.state_dict()
     for name, value in remap.items():
@@ -63,9 +63,7 @@ def save_checkpoint(items, step, model_dir, ignore=[],
                     state_dict.pop(key)
     path_with_step = f'{path_without_step}-{step_padded}'
 
-    saved_dic = {}
-    for key in items:
-        saved_dic[key] = items[key].state_dict()
+    saved_dic = {key: items[key].state_dict() for key in items}
     torch.save({**saved_dic, "step": step}, path_with_step)
 
     try:
@@ -114,9 +112,7 @@ class Saver(object):
            Last training step for the model restored.
         """
         items2restore = {k: self._items[k] for k in item_keys}
-        last_step = load_checkpoint(
-            items2restore, model_dir, map_location, step)
-        return last_step
+        return load_checkpoint(items2restore, model_dir, map_location, step)
 
     def save(self, model_dir, step):
         """Saves model and optimizer to given directory.

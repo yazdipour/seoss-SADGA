@@ -16,7 +16,9 @@ def to_dict_with_set_values(d):
 
 
 def tuplify(x):
-    if not isinstance(x, (tuple, list)):
-        return x
-    return tuple(tuplify(elem) for elem in x)
+    return (
+        tuple(tuplify(elem) for elem in x)
+        if isinstance(x, (tuple, list))
+        else x
+    )
 

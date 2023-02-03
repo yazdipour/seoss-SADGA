@@ -105,7 +105,7 @@ def preprocess_schema_uncached(schema,
     r.table_bounds.append(len(schema.columns))
     assert len(r.table_bounds) == len(schema.tables) + 1
 
-    for i, table in enumerate(schema.tables):
+    for table in schema.tables:
         table_toks = tokenize_func(
             table.name, table.unsplit_name)
         r.table_names.append(table_toks)
@@ -183,11 +183,11 @@ class EncoderPreproc(abstract_preproc.AbstractPreproc):
                     *preprocessed['tables'])
 
             for token in to_count:
-                count_token = (
-                        self.word_emb is None or
-                        self.count_tokens_in_word_emb_for_vocab or
-                        self.word_emb.lookup(token) is None)
-                if count_token:
+                if count_token := (
+                    self.word_emb is None
+                    or self.count_tokens_in_word_emb_for_vocab
+                    or self.word_emb.lookup(token) is None
+                ):
                     self.vocab_builder.add_word(token)
 
     def clear_items(self):
@@ -245,9 +245,7 @@ class EncoderPreproc(abstract_preproc.AbstractPreproc):
         return result
 
     def _tokenize(self, presplit, unsplit):
-        if self.word_emb:
-            return self.word_emb.tokenize(unsplit)
-        return presplit
+        return self.word_emb.tokenize(unsplit) if self.word_emb else presplit
 
     def _tokenize_for_copying(self, presplit, unsplit):
         if self.word_emb:
@@ -262,7 +260,7 @@ class EncoderPreproc(abstract_preproc.AbstractPreproc):
         self.vocab_builder.save(self.vocab_word_freq_path)
 
         for section, texts in self.texts.items():
-            with open(os.path.join(self.data_dir, section + '.jsonl'), 'w') as f:
+            with open(os.path.join(self.data_dir, f'{section}.jsonl'), 'w') as f:
                 for text in texts:
                     f.write(json.dumps(text) + '\n')
 
@@ -273,7 +271,8 @@ class EncoderPreproc(abstract_preproc.AbstractPreproc):
     def dataset(self, section):
         return [
             json.loads(line)
-            for line in open(os.path.join(self.data_dir, section + '.jsonl'))]
+            for line in open(os.path.join(self.data_dir, f'{section}.jsonl'))
+        ]
 
 
 @registry.register('encoder', 'Encoder')
@@ -303,7 +302,7 @@ class Encoder(torch.nn.Module):
         self.hidden_size = hidden_size
         assert self.hidden_size % 2 == 0
         word_freq = self.preproc.vocab_builder.word_freq
-        top_k_words = set([_a[0] for _a in word_freq.most_common(top_k_learnable)])
+        top_k_words = {_a[0] for _a in word_freq.most_common(top_k_learnable)}
         self.learnable_words = top_k_words
 
         self.include_in_memory = set(include_in_memory)
@@ -341,9 +340,7 @@ class Encoder(torch.nn.Module):
                 summarize=True),
         }
 
-        modules = []
-        for module_type in module_types:
-            modules.append(module_builder[module_type]())
+        modules = [module_builder[module_type]() for module_type in module_types]
         return torch.nn.Sequential(*modules)
 
     def forward(self, descs):
@@ -354,24 +351,28 @@ class Encoder(torch.nn.Module):
         column_pointer_maps = [
             {
                 i: list(range(left, right))
-                for i, (left, right) in enumerate(zip(c_boundaries_for_item, c_boundaries_for_item[1:]))
+                for i, (left, right) in enumerate(
+                    zip(c_boundaries_for_item, c_boundaries_for_item[1:])
+                )
             }
-            for batch_idx, c_boundaries_for_item in enumerate(c_boundaries)
+            for c_boundaries_for_item in c_boundaries
         ]
 
         t_enc, t_boundaries = self.table_encoder([desc['tables'] for desc in descs])
         table_pointer_maps = [
             {
                 i: list(range(left, right))
-                for i, (left, right) in enumerate(zip(t_boundaries_for_item, t_boundaries_for_item[1:]))
+                for i, (left, right) in enumerate(
+                    zip(t_boundaries_for_item, t_boundaries_for_item[1:])
+                )
             }
-            for batch_idx, (desc, t_boundaries_for_item) in enumerate(zip(descs, t_boundaries))
+            for desc, t_boundaries_for_item in zip(descs, t_boundaries)
         ]
 
         result = []
         for batch_idx, desc in enumerate(descs):
             q_enc_new_item, c_enc_new_item, t_enc_new_item, align_mat_item = \
-                self.encs_update.forward_unbatched(
+                    self.encs_update.forward_unbatched(
                     desc,
                     q_enc.select(batch_idx).unsqueeze(1),
                     c_enc.select(batch_idx).unsqueeze(1),
@@ -436,8 +437,8 @@ class Bertokens:
         E.g., a ##b ##c will be normalized as "abc", "", ""
         NOTE: this is only used for schema linking
         """
-        self.startidx2pieces = dict()
-        self.pieces2startidx = dict()
+        self.startidx2pieces = {}
+        self.pieces2startidx = {}
         cache_start = None
         for i, piece in enumerate(self.pieces + [""]):
             if piece.startswith("##"):
@@ -455,7 +456,7 @@ class Bertokens:
         # combine pieces, "abc", "", ""
         combined_word = {}
         for start, end in self.startidx2pieces.items():
-            assert end - start + 1 < 10
+            assert end - start < 9
             pieces = [self.pieces[start]] + [self.pieces[_id].strip("##") for _id in range(start + 1, end)]
             word = "".join(pieces)
             combined_word[start] = word
@@ -467,17 +468,14 @@ class Bertokens:
             if i in combined_word:
                 idx_map[len(new_toks)] = i
                 new_toks.append(combined_word[i])
-            elif i in self.pieces2startidx:
-                # remove it
-                pass
-            else:
+            elif i not in self.pieces2startidx:
                 idx_map[len(new_toks)] = i
                 new_toks.append(piece)
         self.idx_map = idx_map
 
         # lemmatize "abc"
         normalized_toks = []
-        for i, tok in enumerate(new_toks):
+        for tok in new_toks:
             ann = corenlp.annotate(tok, annotators=['tokenize', 'ssplit', 'lemma'])
             lemmas = [tok.lemma.lower() for sent in ann.sentence for tok in sent.token]
             lemma_word = " ".join(lemmas)
@@ -535,10 +533,7 @@ class EncoderPreproc4Bert(EncoderPreproc):
         self.tokenizer.add_tokens([f"<type: {t}>" for t in column_types])
 
     def _tokenize(self, presplit, unsplit):
-        if self.tokenizer:
-            toks = self.tokenizer.tokenize(unsplit)
-            return toks
-        return presplit
+        return self.tokenizer.tokenize(unsplit) if self.tokenizer else presplit
 
     def add_item(self, item, section, validation_info):
         preprocessed = self.preprocess_item(item, validation_info)
@@ -594,12 +589,9 @@ class EncoderPreproc4Bert(EncoderPreproc):
         preproc_schema = self._preprocess_schema(item.schema)
 
         num_words = len(question) + 2 + \
-                    sum(len(c) + 1 for c in preproc_schema.column_names) + \
-                    sum(len(t) + 1 for t in preproc_schema.table_names)
-        if num_words > 512:
-            return False, None  # remove long sequences
-        else:
-            return True, None
+                        sum(len(c) + 1 for c in preproc_schema.column_names) + \
+                        sum(len(t) + 1 for t in preproc_schema.table_names)
+        return (False, None) if num_words > 512 else (True, None)
 
     def _preprocess_schema(self, schema):
         if schema.db_id in self.preprocessed_schemas:
@@ -615,7 +607,7 @@ class EncoderPreproc4Bert(EncoderPreproc):
         self.tokenizer.save_pretrained(self.data_dir)
 
         for section, texts in self.texts.items():
-            with open(os.path.join(self.data_dir, section + '.jsonl'), 'w') as f:
+            with open(os.path.join(self.data_dir, f'{section}.jsonl'), 'w') as f:
                 for text in texts:
                     f.write(json.dumps(text) + '\n')
 
@@ -682,7 +674,7 @@ class Encoder4Bert(torch.nn.Module):
             tabs = [self.pad_single_sentence_for_bert(t, cls=False) for t in desc['tables']]
 
             token_list = qs + [c for col in cols for c in col] + \
-                         [t for tab in tabs for t in tab]
+                             [t for tab in tabs for t in tab]
             assert self.check_bert_seq(token_list)
             if len(token_list) > 512:
                 long_seq_set.add(batch_idx)
@@ -694,14 +686,14 @@ class Encoder4Bert(torch.nn.Module):
             question_indexes = list(range(q_b))[1:-1]
             # use the first representation for column/table
             column_indexes = \
-                np.cumsum([q_b] + [len(token_list) for token_list in cols[:-1]]).tolist()
+                    np.cumsum([q_b] + [len(token_list) for token_list in cols[:-1]]).tolist()
             table_indexes = \
-                np.cumsum([col_b] + [len(token_list) for token_list in tabs[:-1]]).tolist()
+                    np.cumsum([col_b] + [len(token_list) for token_list in tabs[:-1]]).tolist()
             if self.summarize_header == "avg":
                 column_indexes_2 = \
-                    np.cumsum([q_b - 2] + [len(token_list) for token_list in cols]).tolist()[1:]
+                        np.cumsum([q_b - 2] + [len(token_list) for token_list in cols]).tolist()[1:]
                 table_indexes_2 = \
-                    np.cumsum([col_b - 2] + [len(token_list) for token_list in tabs]).tolist()[1:]
+                        np.cumsum([col_b - 2] + [len(token_list) for token_list in tabs]).tolist()[1:]
 
             indexed_token_list = self.tokenizer.convert_tokens_to_ids(token_list)
             batch_token_lists.append(indexed_token_list)
@@ -750,7 +742,7 @@ class Encoder4Bert(torch.nn.Module):
             for desc in descs
         ]
 
-        assert len(long_seq_set) == 0
+        assert not long_seq_set
 
         result = []
         for batch_idx, desc in enumerate(descs):
@@ -777,7 +769,7 @@ class Encoder4Bert(torch.nn.Module):
             assert tab_enc.size()[0] == t_boundary[-1]
 
             q_enc_new_item, c_enc_new_item, t_enc_new_item, align_mat_item = \
-                self.encs_update.forward_unbatched(
+                    self.encs_update.forward_unbatched(
                     desc,
                     q_enc.unsqueeze(1),
                     col_enc.unsqueeze(1),
@@ -836,7 +828,7 @@ class Encoder4Bert(torch.nn.Module):
             outputs = self.bert_model(tokens_tensor)
             return outputs[0][0, 1:-1]  # remove [CLS] and [SEP]
         else:
-            max_len = max([len(it) for it in toks])
+            max_len = max(len(it) for it in toks)
             tok_ids = []
             for item_toks in toks:
                 item_toks = item_toks + [self.tokenizer.pad_token] * (max_len - len(item_toks))
@@ -848,10 +840,10 @@ class Encoder4Bert(torch.nn.Module):
             return outputs[0][:, 0, :]
 
     def check_bert_seq(self, toks):
-        if toks[0] == self.tokenizer.cls_token and toks[-1] == self.tokenizer.sep_token:
-            return True
-        else:
-            return False
+        return (
+            toks[0] == self.tokenizer.cls_token
+            and toks[-1] == self.tokenizer.sep_token
+        )
 
     def pad_single_sentence_for_bert(self, toks, cls=True):
         if cls:
@@ -861,7 +853,7 @@ class Encoder4Bert(torch.nn.Module):
 
     def pad_sequence_for_bert_batch(self, tokens_lists):
         pad_id = self.tokenizer.pad_token_id
-        max_len = max([len(it) for it in tokens_lists])
+        max_len = max(len(it) for it in tokens_lists)
         assert max_len <= 512
         toks_ids = []
         att_masks = []
@@ -902,7 +894,7 @@ class BartTokens:
             toks.extend(self.tokenizer.tokenize(tok, add_prefix_space=True))
 
         normalized_toks = []
-        for i, tok in enumerate(tokens):
+        for tok in tokens:
             ann = corenlp.annotate(tok, annotators=["tokenize", "ssplit", "lemma"])
             lemmas = [tok.lemma.lower() for sent in ann.sentence for tok in sent.token]
             lemma_word = " ".join(lemmas)
@@ -963,7 +955,7 @@ def preprocess_schema_uncached_bart(schema,
             column.name, column.unsplit_name)
 
         # assert column.type in ["text", "number", "time", "boolean", "others"]
-        type_tok = '<type: {}>'.format(column.type)
+        type_tok = f'<type: {column.type}>'
         if bart:
             # for bert, we take the representation of the first word
             column_name = col_toks + [type_tok]
@@ -996,7 +988,7 @@ def preprocess_schema_uncached_bart(schema,
     r.table_bounds.append(len(schema.columns))
     assert len(r.table_bounds) == len(schema.tables) + 1
 
-    for i, table in enumerate(schema.tables):
+    for table in schema.tables:
         table_toks = tokenize_func(
             table.name, table.unsplit_name)
         r.table_names.append(table_toks)
@@ -1113,12 +1105,9 @@ class EncoderPreproc4Gap(EncoderPreproc):
         preproc_schema = self._preprocess_schema(item.schema)
         # 2 is for cls and sep special tokens. +1 is for sep
         num_words = len(question) + 2 + \
-                    sum(len(c) + 1 for c in preproc_schema.column_names) + \
-                    sum(len(t) + 1 for t in preproc_schema.table_names)
-        if num_words > 512:
-            return False, None
-        else:
-            return True, None
+                        sum(len(c) + 1 for c in preproc_schema.column_names) + \
+                        sum(len(t) + 1 for t in preproc_schema.table_names)
+        return (False, None) if num_words > 512 else (True, None)
 
     def _preprocess_schema(self, schema):
         if schema.db_id in self.preprocessed_schemas:
@@ -1134,7 +1123,7 @@ class EncoderPreproc4Gap(EncoderPreproc):
         self.tokenizer.save_pretrained(self.data_dir)
 
         for section, texts in self.texts.items():
-            with open(os.path.join(self.data_dir, section + '.jsonl'), 'w') as f:
+            with open(os.path.join(self.data_dir, f'{section}.jsonl'), 'w') as f:
                 for text in texts:
                     f.write(json.dumps(text) + '\n')
 

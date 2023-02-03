@@ -222,8 +222,7 @@ class ASTWrapper(object):
                     continue
                 raise ValueError(f'required field {field.name} is missing. path: {field_path}')
 
-            if field.seq and field.name in node and not isinstance(
-                    node[field.name], (list, tuple)):  # noqa: E125
+            if field.seq and not isinstance(node[field.name], (list, tuple)):  # noqa: E125
                 raise ValueError(f'sequential field {field.name} is not sequence. path: {field_path}')
 
             # Check that each item in this field has the expected type.
@@ -260,8 +259,7 @@ class ASTWrapper(object):
                     values = [node[field_info.name]]
 
                 if field_info.type == type:
-                    for value in values:
-                        yield value
+                    yield from values
                 else:
                     queue.extend(values)
 

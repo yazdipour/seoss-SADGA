@@ -5,8 +5,24 @@ def compute_align_loss(model, desc_enc, example):
     '''model: a decoder decoder'''
     # find relevant columns
     root_node = example.tree
-    rel_cols = list(reversed([val for val in model.ast_wrapper.find_all_descendants_of_type(root_node, "column")]))
-    rel_tabs = list(reversed([val for val in model.ast_wrapper.find_all_descendants_of_type(root_node, "table")]))
+    rel_cols = list(
+        reversed(
+            list(
+                model.ast_wrapper.find_all_descendants_of_type(
+                    root_node, "column"
+                )
+            )
+        )
+    )
+    rel_tabs = list(
+        reversed(
+            list(
+                model.ast_wrapper.find_all_descendants_of_type(
+                    root_node, "table"
+                )
+            )
+        )
+    )
 
     rel_cols_t = torch.LongTensor(sorted(list(set(rel_cols)))).to(model._device)
     rel_tabs_t = torch.LongTensor(sorted(list(set(rel_tabs)))).to(model._device)
@@ -36,8 +52,7 @@ def compute_align_loss(model, desc_enc, example):
     else:
         mt_margin = torch.tensor(0.0).to(model._device)
 
-    align_loss = - torch.log(mc_max_rel_att).mean() - torch.log(mt_max_rel_att).mean()
-    return align_loss
+    return - torch.log(mc_max_rel_att).mean() - torch.log(mt_max_rel_att).mean()
 
 
 def compute_pointer_with_align(

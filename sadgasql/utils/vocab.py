@@ -14,7 +14,7 @@ class Sentinel(object):
 
     def __repr__(self):
         # type: () -> str
-        return '<' + self.name + '>'
+        return f'<{self.name}>'
 
     def __lt__(self, other):
         # type: (object) -> bool
@@ -36,7 +36,7 @@ class Vocab(collections.abc.Set):
         elements.extend(iterable)
         assert len(elements) == len(set(elements))
 
-        self.id_to_elem = {i: elem for i, elem in enumerate(elements)}
+        self.id_to_elem = dict(enumerate(elements))
         self.elem_to_id = {elem: i for i, elem in enumerate(elements)}
 
     def __iter__(self):
@@ -74,7 +74,7 @@ class Vocab(collections.abc.Set):
         return id(self)
 
     @classmethod
-    def load(self, in_path):
+    def load(cls, in_path):
         return Vocab(json.load(open(in_path)), special_elems=())
 
     def save(self, out_path):

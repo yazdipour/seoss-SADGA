@@ -17,7 +17,7 @@ def read_index(filename):
 class IndexedFileWriter(object):
     def __init__(self, path):
         self.f = open(path, 'wb')
-        self.index_f = open(path + '.index', 'wb')
+        self.index_f = open(f'{path}.index', 'wb')
 
     def append(self, record):
         offset = self.f.tell()
@@ -33,7 +33,7 @@ class IndexedFileReader(object):
     def __init__(self, path):
         self.f = open(path, 'rb')
 
-        self.index = read_index(path + '.index')
+        self.index = read_index(f'{path}.index')
         self.lengths = [
             end - start
             for start, end in zip([0] + self.index, self.index +

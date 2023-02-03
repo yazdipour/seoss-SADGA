@@ -18,7 +18,7 @@ def beam_search(model, orig_item, preproc_item, beam_size, max_steps):
     beam = [Hypothesis(inference_state, next_choices)]
     finished = []
 
-    for step in range(max_steps):
+    for _ in range(max_steps):
         # Check if all beams are finished
         if len(finished) == beam_size:
             break

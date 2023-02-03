@@ -11,7 +11,7 @@ from sadgasql.utils import registry
 
 
 def bimap(first, second):
-    return {f: s for f, s in zip(first, second)}, {s: f for f, s in zip(first, second)}
+    return dict(zip(first, second)), {s: f for f, s in zip(first, second)}
 
 
 def filter_nones(d):
@@ -97,24 +97,22 @@ class SpiderLanguage:
         self.end_with_from = end_with_from
         self.clause_order = clause_order
         self.infer_from_conditions = infer_from_conditions
+        sql_fields = self.ast_wrapper.product_types['sql'].fields
         if self.clause_order:
             # clause order is prioritized over configurations like end_with_from
             assert factorize_sketch == 2  # TODO support other grammars
-            sql_fields = self.ast_wrapper.product_types['sql'].fields
-            letter2field = {k: v for k, v in zip("SFWGOI", sql_fields)}
+            letter2field = dict(zip("SFWGOI", sql_fields))
             new_sql_fields = [letter2field[k] for k in self.clause_order]
             self.ast_wrapper.product_types['sql'].fields = new_sql_fields
-        else:
-            if not self.output_from:
-                sql_fields = self.ast_wrapper.product_types['sql'].fields
-                assert sql_fields[1].name == 'from'
+        elif self.output_from:
+            assert sql_fields[1].name == "from"
+            if self.end_with_from:
+                sql_fields.append(sql_fields[1])
                 del sql_fields[1]
-            else:
-                sql_fields = self.ast_wrapper.product_types['sql'].fields
-                assert sql_fields[1].name == "from"
-                if self.end_with_from:
-                    sql_fields.append(sql_fields[1])
-                    del sql_fields[1]
+
+        else:
+            assert sql_fields[1].name == 'from'
+            del sql_fields[1]
 
     def parse(self, code, section):
         return self.parse_sql(code)
@@ -138,24 +136,28 @@ class SpiderLanguage:
 
     def parse_val(self, val):
         if isinstance(val, str):
-            if not self.include_literals:
-                return {'_type': 'Terminal'}
-            return {
-                '_type': 'String',
-                's': val,
-            }
+            return (
+                {
+                    '_type': 'String',
+                    's': val,
+                }
+                if self.include_literals
+                else {'_type': 'Terminal'}
+            )
         elif isinstance(val, list):
             return {
                 '_type': 'ColUnit',
                 'c': self.parse_col_unit(val),
             }
         elif isinstance(val, float):
-            if not self.include_literals:
-                return {'_type': 'Terminal'}
-            return {
-                '_type': 'Number',
-                'f': val,
-            }
+            return (
+                {
+                    '_type': 'Number',
+                    'f': val,
+                }
+                if self.include_literals
+                else {'_type': 'Terminal'}
+            )
         elif isinstance(val, dict):
             return {
                 '_type': 'ValSql',
@@ -325,13 +327,17 @@ class SpiderLanguage:
         }
 
     def parse_from(self, from_, infer_from_conditions=False):
-        return filter_nones({
-            '_type': 'from',
-            'table_units': [
-                self.parse_table_unit(u) for u in from_['table_units']],
-            'conds': self.parse_cond(from_['conds'], optional=True) \
-                if not infer_from_conditions else None,
-        })
+        return filter_nones(
+            {
+                '_type': 'from',
+                'table_units': [
+                    self.parse_table_unit(u) for u in from_['table_units']
+                ],
+                'conds': None
+                if infer_from_conditions
+                else self.parse_cond(from_['conds'], optional=True),
+            }
+        )
 
     def parse_order_by(self, order_by):
         if not order_by:
@@ -402,11 +408,10 @@ class SpiderUnparser:
 
     @classmethod
     def linearize_cond(cls, cond):
-        if cond['_type'] in ('And', 'Or'):
-            conds, keywords = cls.linearize_cond(cond['right'])
-            return [cond['left']] + conds, [cond['_type']] + keywords
-        else:
+        if cond['_type'] not in ('And', 'Or'):
             return [cond], []
+        conds, keywords = cls.linearize_cond(cond['right'])
+        return [cond['left']] + conds, [cond['_type']] + keywords
 
     def unparse_val(self, val):
         if val['_type'] == 'Terminal':
@@ -433,10 +438,7 @@ class SpiderUnparser:
         if col_unit['is_distinct']:
             column_name = f'DISTINCT {column_name}'
         agg_type = col_unit['agg_id']['_type']
-        if agg_type == 'NoneAggOp':
-            return column_name
-        else:
-            return f'{agg_type}({column_name})'
+        return column_name if agg_type == 'NoneAggOp' else f'{agg_type}({column_name})'
 
     def unparse_val_unit(self, val_unit):
         if val_unit['_type'] == 'Column':
@@ -502,8 +504,11 @@ class SpiderUnparser:
         candidate_column_ids = set(self.ast_wrapper.find_all_descendants_of_type(
             tree, 'column', lambda field: field.type != 'sql'))
         candidate_columns = [self.schema.columns[i] for i in candidate_column_ids]
-        must_in_from_table_ids = set(
-            column.table.id for column in candidate_columns if column.table is not None)
+        must_in_from_table_ids = {
+            column.table.id
+            for column in candidate_columns
+            if column.table is not None
+        }
 
         # Table the union of inferred and predicted tables
         all_from_table_ids = must_in_from_table_ids.union(predicted_from_table_ids)

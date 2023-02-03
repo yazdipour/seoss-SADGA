@@ -123,13 +123,13 @@ class InferenceTreeTraversal(TreeTraversal):
     def finalize(self):
         root = current = None
         stack = []
-        for i, action in enumerate(self.actions):
+        for action in self.actions:
             if isinstance(action, self.SetParentField):
-                if action.node_value is None:
-                    new_node = {'_type': action.node_type}
-                else:
-                    new_node = action.node_value
-
+                new_node = (
+                    {'_type': action.node_type}
+                    if action.node_value is None
+                    else action.node_value
+                )
                 if action.parent_field_name is None:
                     # Initial node in tree.
                     assert root is None
@@ -159,8 +159,9 @@ class InferenceTreeTraversal(TreeTraversal):
 
             elif isinstance(action, self.FinalizeTerminal):
                 terminal = ''.join(current.get(action.parent_field_name, []))
-                constructor = self.SIMPLE_TERMINAL_TYPES.get(action.terminal_type)
-                if constructor:
+                if constructor := self.SIMPLE_TERMINAL_TYPES.get(
+                    action.terminal_type
+                ):
                     try:
                         value = constructor(terminal)
                     except ValueError:

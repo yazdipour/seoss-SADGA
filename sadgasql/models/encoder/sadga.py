@@ -51,7 +51,7 @@ class Encoder(nn.Module):
 
     def forward(self, x, relation, q_len, desc):
         "Pass the input (and mask) through each layer in turn."
-        for index, layer in enumerate(self.layers):
+        for layer in self.layers:
             x = layer(x, relation, q_len, desc)
         return self.norm(x)
 
@@ -165,9 +165,7 @@ class SadgaLayer(nn.Module):
                                          torch.transpose(nl_db_re_v, 1, 0),
                                          torch.LongTensor(nl_adj).to(self._device))
 
-        h = torch.cat([nl_output, db_output])
-
-        return h
+        return torch.cat([nl_output, db_output])
 
     def _add_relation_node(self, x, relation):
         num_item = x.size(1)
@@ -175,24 +173,18 @@ class SadgaLayer(nn.Module):
 
         adj_forward = []
         adj_back = []
-        adj_self = []
-
         relation_ids = []
-        for i, j in itertools.product(range(num_item), repeat=2):
+        for i, j in itertools.product(range(relation_index), repeat=2):
             if i <= j:
                 continue
             relation_id = relation[i][j]
             if relation_id != 0:
                 relation_ids.append(relation_id)
-                adj_forward.append((i, relation_index))
-                adj_forward.append((relation_index, j))
-                adj_back.append((j, relation_index))
-                adj_back.append((relation_index, i))
+                adj_forward.extend(((i, relation_index), (relation_index, j)))
+                adj_back.extend(((j, relation_index), (relation_index, i)))
                 relation_index = relation_index + 1
         num_node = relation_index
-        for i in range(num_node):
-            adj_self.append((i, i))
-
+        adj_self = [(i, i) for i in range(num_node)]
         relations_t = torch.LongTensor(relation_ids).to(self._device)
         relation_emb = self.rel_v_emb(relations_t)
 
@@ -200,9 +192,9 @@ class SadgaLayer(nn.Module):
         all_adj_types = [adj_forward, adj_back, adj_self]
 
         adj_list = []
-        for i in range(len(all_adj_types)):
+        for all_adj_type in all_adj_types:
             adj_t = input.new_zeros((input.size(0), input.size(0)))
-            adj_tuple = all_adj_types[i]
+            adj_tuple = all_adj_type
             for edge in adj_tuple:
                 adj_t[edge[1], edge[0]] = 1
             adj_list.append(adj_t.to_sparse())
@@ -273,6 +265,4 @@ class StructureAwareGraphAggr(nn.Module):
         q_enc_new = k_matmul + k_r_matmul
 
         gate = torch.sigmoid(self.gate_linear(torch.cat([q_enc_new, q_enc], dim=-1)))
-        h = gate * q_enc_new + (1 - gate) * q_enc
-
-        return h
+        return gate * q_enc_new + (1 - gate) * q_enc

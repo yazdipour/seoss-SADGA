@@ -76,9 +76,7 @@ class GloVe(Embedder):
 
     def lookup(self, token):
         i = self.glove.stoi.get(token)
-        if i is None:
-            return None
-        return self.vectors[i]
+        return None if i is None else self.vectors[i]
 
     def contains(self, token):
         return token in self.glove.stoi
@@ -102,9 +100,7 @@ class BPEmb(Embedder):
 
     def lookup(self, token):
         i = self.bpemb.spm.PieceToId(token)
-        if i == self.bpemb.spm.unk_id():
-            return None
-        return self.vectors[i]
+        return None if i == self.bpemb.spm.unk_id() else self.vectors[i]
 
     def contains(self, token):
         return self.lookup(token) is not None

@@ -72,11 +72,12 @@ class Trainer:
         with self.init_random:
             if config["optimizer"].get("name", None) == 'bertAdamw':
                 bert_params = list(self.model.encoder.bert_model.parameters())
-                assert len(bert_params) > 0
-                non_bert_params = []
-                for name, _param in self.model.named_parameters():
-                    if "bert" not in name:
-                        non_bert_params.append(_param)
+                assert bert_params
+                non_bert_params = [
+                    _param
+                    for name, _param in self.model.named_parameters()
+                    if "bert" not in name
+                ]
                 assert len(non_bert_params) + len(bert_params) == len(list(self.model.parameters()))
 
                 optimizer = registry.construct('optimizer', config['optimizer'], non_bert_params=non_bert_params,
@@ -127,7 +128,7 @@ class Trainer:
 
                     if self.train_config.clip_grad:
                         torch.nn.utils.clip_grad_norm_(optimizer.bert_param_group["params"], \
-                                                       self.train_config.clip_grad)
+                                                           self.train_config.clip_grad)
                     optimizer.step()
                     lr_scheduler.update_lr(last_step)
                     optimizer.zero_grad()
@@ -143,8 +144,7 @@ class Trainer:
     @staticmethod
     def _yield_batches_from_epochs(loader):
         while True:
-            for batch in loader:
-                yield batch
+            yield from loader
 
 def main(args):
     config = json.loads(_jsonnet.evaluate_file(args.config))

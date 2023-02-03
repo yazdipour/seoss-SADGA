@@ -33,9 +33,14 @@ def main(data_dir, res_dir, pred_name, acc_res_name):
                     if "EXACT MATCHING ACCURACY" in line1:
                         tmp = True
         else:
-            scores = evaluation.main(gold=data_dir + 'dev_gold.sql', pred=predict_file,
-                                     db_dir=data_dir + 'database/',
-                                     table=data_dir + 'tables.json', etype='match', res_file=res_file)
+            scores = evaluation.main(
+                gold=f'{data_dir}dev_gold.sql',
+                pred=predict_file,
+                db_dir=f'{data_dir}database/',
+                table=f'{data_dir}tables.json',
+                etype='match',
+                res_file=res_file,
+            )
             sys.stdout = ori
             cur_res = scores['all']['exact']
 

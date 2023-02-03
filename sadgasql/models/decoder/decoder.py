@@ -61,11 +61,11 @@ def get_field_presence_info(ast_wrapper, node, field_infos):
         if maybe_missing and is_builtin_type:
             # TODO: make it possible to deal with "singleton?"
             present.append(is_present and type(field_value).__name__)
-        elif maybe_missing and not is_builtin_type:
+        elif maybe_missing:
             present.append(is_present)
-        elif not maybe_missing and is_builtin_type:
+        elif is_builtin_type:
             present.append(type(field_value).__name__)
-        elif not maybe_missing and not is_builtin_type:
+        else:
             assert is_present
             present.append(True)
     return tuple(present)
@@ -107,8 +107,7 @@ class DecoderPreproc(abstract_preproc.AbstractPreproc):
         self.rules_mask = None
 
     def validate_item(self, item, section):
-        parsed = self.grammar.parse(item.code, section)
-        if parsed:
+        if parsed := self.grammar.parse(item.code, section):
             try:
                 self.ast_wrapper.verify_ast(parsed)
             except AssertionError:
@@ -137,7 +136,7 @@ class DecoderPreproc(abstract_preproc.AbstractPreproc):
         self.vocab.save(self.vocab_path)
 
         for section, items in self.items.items():
-            with open(os.path.join(self.data_dir, section + '.jsonl'), 'w') as f:
+            with open(os.path.join(self.data_dir, f'{section}.jsonl'), 'w') as f:
                 for item in items:
                     f.write(json.dumps(attr.asdict(item)) + '\n')
 
@@ -181,7 +180,8 @@ class DecoderPreproc(abstract_preproc.AbstractPreproc):
     def dataset(self, section):
         return [
             NL2CodeDecoderPreprocItem(**json.loads(line))
-            for line in open(os.path.join(self.data_dir, section + '.jsonl'))]
+            for line in open(os.path.join(self.data_dir, f'{section}.jsonl'))
+        ]
 
     def _record_productions(self, tree):
         queue = [(tree, False)]
@@ -196,7 +196,7 @@ class DecoderPreproc(abstract_preproc.AbstractPreproc):
                 if type_name in self.ast_wrapper.constructors:
                     sum_type_name = self.ast_wrapper.constructor_to_sum_type[type_name]
                     if is_seq_elem and self.use_seq_elem_rules:
-                        self.sum_type_constructors[sum_type_name + '_seq_elem'].add(type_name)
+                        self.sum_type_constructors[f'{sum_type_name}_seq_elem'].add(type_name)
                     else:
                         self.sum_type_constructors[sum_type_name].add(type_name)
 
@@ -223,7 +223,7 @@ class DecoderPreproc(abstract_preproc.AbstractPreproc):
                     # stmt* -> stmt
                     #        | stmt stmt
                     #        | stmt stmt stmt
-                    self.seq_lengths[field_info.type + '*'].add(len(field_value))
+                    self.seq_lengths[f'{field_info.type}*'].add(len(field_value))
                     to_enqueue = field_value
                 else:
                     to_enqueue = [field_value]
@@ -285,8 +285,7 @@ class DecoderPreproc(abstract_preproc.AbstractPreproc):
                 if field_info.type in self.grammar.pointers:
                     pass
                 elif field_info.type in self.ast_wrapper.primitive_types:
-                    for token in self.grammar.tokenize_field_value(field_value):
-                        yield token
+                    yield from self.grammar.tokenize_field_value(field_value)
                 elif isinstance(field_value, (list, tuple)):
                     queue.extend(field_value)
                 elif field_value is not None:
@@ -452,15 +451,14 @@ class Decoder(torch.nn.Module):
             self.xent_loss = self.label_smooth_loss
 
     def label_smooth_loss(self, X, target, smooth_value=0.1):
-        if self.training:
-            logits = torch.log_softmax(X, dim=1)
-            size = X.size()[1]
-            one_hot = torch.full(X.size(), smooth_value / (size - 1)).to(X.device)
-            one_hot.scatter_(1, target.unsqueeze(0), 1 - smooth_value)
-            loss = F.kl_div(logits, one_hot, reduction="batchmean")
-            return loss.unsqueeze(0)
-        else:
+        if not self.training:
             return torch.nn.functional.cross_entropy(X, target, reduction="none")
+        logits = torch.log_softmax(X, dim=1)
+        size = X.size()[1]
+        one_hot = torch.full(X.size(), smooth_value / (size - 1)).to(X.device)
+        one_hot.scatter_(1, target.unsqueeze(0), 1 - smooth_value)
+        loss = F.kl_div(logits, one_hot, reduction="batchmean")
+        return loss.unsqueeze(0)
 
     @classmethod
     def _calculate_rules(cls, preproc):
@@ -505,11 +503,13 @@ class Decoder(torch.nn.Module):
         return all_rules, rules_mask
 
     def compute_loss(self, enc_input, example, desc_enc, debug):
-        if not (self.enumerate_order and self.training):
-            mle_loss = self.compute_mle_loss(enc_input, example, desc_enc, debug)
-        else:
-            mle_loss = self.compute_loss_from_all_ordering(enc_input, example, desc_enc, debug)
-
+        mle_loss = (
+            self.compute_loss_from_all_ordering(
+                enc_input, example, desc_enc, debug
+            )
+            if (self.enumerate_order and self.training)
+            else self.compute_mle_loss(enc_input, example, desc_enc, debug)
+        )
         if self.use_align_loss:
             align_loss = self.compute_align_loss(desc_enc, example)
             return mle_loss + align_loss
@@ -577,7 +577,7 @@ class Decoder(torch.nn.Module):
             parent_field_type = item.parent_field_type
 
             if isinstance(node, (list, tuple)):
-                node_type = parent_field_type + '*'
+                node_type = f'{parent_field_type}*'
                 rule = (node_type, len(node))
                 rule_idx = self.rules_index[rule]
                 assert traversal.cur_item.state == TreeTraversal.State.LIST_LENGTH_APPLY
@@ -586,32 +586,31 @@ class Decoder(torch.nn.Module):
                 if self.preproc.use_seq_elem_rules and parent_field_type in self.ast_wrapper.sum_types:
                     parent_field_type += '_seq_elem'
 
-                for i, elem in reversed(list(enumerate(node))):
-                    queue.append(
-                        TreeState(
-                            node=elem,
-                            parent_field_type=parent_field_type,
-                        ))
+                queue.extend(
+                    TreeState(
+                        node=elem,
+                        parent_field_type=parent_field_type,
+                    )
+                    for i, elem in reversed(list(enumerate(node)))
+                )
                 continue
 
             if parent_field_type in self.preproc.grammar.pointers:
                 assert isinstance(node, int)
                 assert traversal.cur_item.state == TreeTraversal.State.POINTER_APPLY
-                pointer_map = desc_enc.pointer_maps.get(parent_field_type)
-                if pointer_map:
+                if pointer_map := desc_enc.pointer_maps.get(parent_field_type):
                     values = pointer_map[node]
                     if self.sup_att == '1h':
                         if len(pointer_map) == len(enc_input['columns']):
-                            if self.attn_type != 'sep':
-                                traversal.step(values[0], values[1:], node + len(enc_input['question']))
-                            else:
+                            if self.attn_type == 'sep':
                                 traversal.step(values[0], values[1:], node)
-                        else:
-                            if self.attn_type != 'sep':
-                                traversal.step(values[0], values[1:],
-                                               node + len(enc_input['question']) + len(enc_input['columns']))
                             else:
-                                traversal.step(values[0], values[1:], node + len(enc_input['columns']))
+                                traversal.step(values[0], values[1:], node + len(enc_input['question']))
+                        elif self.attn_type != 'sep':
+                            traversal.step(values[0], values[1:],
+                                           node + len(enc_input['question']) + len(enc_input['columns']))
+                        else:
+                            traversal.step(values[0], values[1:], node + len(enc_input['columns']))
                     else:
                         traversal.step(values[0], values[1:])
                 else:
@@ -682,10 +681,9 @@ class Decoder(torch.nn.Module):
         query = prev_state[0]
         if self.attn_type != 'sep':
             return self.desc_attn(query, desc_enc.memory, attn_mask=None)
-        else:
-            question_context, question_attention_logits = self.question_attn(query, desc_enc.question_memory)
-            schema_context, schema_attention_logits = self.schema_attn(query, desc_enc.schema_memory)
-            return question_context + schema_context, schema_attention_logits
+        question_context, question_attention_logits = self.question_attn(query, desc_enc.question_memory)
+        schema_context, schema_attention_logits = self.schema_attn(query, desc_enc.schema_memory)
+        return question_context + schema_context, schema_attention_logits
 
     def _tensor(self, data, dtype=None):
         return torch.tensor(data, dtype=dtype, device=self._device)
@@ -776,24 +774,13 @@ class Decoder(torch.nn.Module):
         # action_emb shape: batch (=1) x emb_size
         action_emb = self.terminal_embedding(token_idx)
 
-        # +unk, +in desc: copy
-        # +unk, -in desc: gen (an unk token)
-        # -unk, +in desc: copy, gen
-        # -unk, -in desc: gen
-        # gen_logodds shape: batch (=1)
-        desc_locs = desc_enc.find_word_occurrences(token)
-        if desc_locs:
+        if desc_locs := desc_enc.find_word_occurrences(token):
             # copy: if the token appears in the description at least once
             # copy_loc_logits shape: batch (=1) x desc length
             copy_loc_logits = self.copy_pointer(output, desc_enc.memory)
-            copy_logprob = (
-                # log p(copy | output)
-                # shape: batch (=1)
-                    torch.nn.functional.logsigmoid(-gen_logodds) -
-                    # xent_loss: -log p(location | output)
-                    # TODO: sum the probability of all occurrences
-                    # shape: batch (=1)
-                    self.xent_loss(copy_loc_logits, self._tensor(desc_locs[0:1])))
+            copy_logprob = torch.nn.functional.logsigmoid(
+                -gen_logodds
+            ) - self.xent_loss(copy_loc_logits, self._tensor(desc_locs[:1]))
         else:
             copy_logprob = None
 
@@ -811,11 +798,9 @@ class Decoder(torch.nn.Module):
         else:
             gen_logprob = None
 
-        # loss should be -log p(...), so negate
-        loss_piece = -torch.logsumexp(
-            maybe_stack([copy_logprob, gen_logprob], dim=1),
-            dim=1)
-        return loss_piece
+        return -torch.logsumexp(
+            maybe_stack([copy_logprob, gen_logprob], dim=1), dim=1
+        )
 
     def token_infer(self, output, gen_logodds, desc_enc):
         # Copy tokens

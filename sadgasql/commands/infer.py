@@ -46,10 +46,12 @@ class Inferer:
         model.eval()
 
         saver = saver_mod.Saver({"model": model})
-        last_step = saver.restore(logdir, step=step, map_location=self.device, item_keys=["model"])
-        if not last_step:
+        if last_step := saver.restore(
+            logdir, step=step, map_location=self.device, item_keys=["model"]
+        ):
+            return model
+        else:
             raise Exception(f"Attempting to infer on untrained model in {logdir}, step={step}")
-        return model
 
     def infer(self, model, output_path, args):
         output = open(output_path, 'w')

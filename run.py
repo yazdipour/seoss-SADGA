@@ -58,7 +58,9 @@ def main():
                 if file_ext[-1] == 'infer':
                     step = int(file_ext[0][file_ext[0].index('step') + 4:])
                     start_step = max(step, start_step)
-        infer_steps = [x for x in range(int(start_step + keep_every_n), max_steps + 1, keep_every_n)] + [max_steps]
+        infer_steps = list(
+            range(int(start_step + keep_every_n), max_steps + 1, keep_every_n)
+        ) + [max_steps]
         for step in infer_steps:
             infer_config = InferConfig(
                 model_config_file,

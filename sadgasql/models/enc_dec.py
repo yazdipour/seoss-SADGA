@@ -7,7 +7,7 @@ from sadgasql.utils import registry
 
 class ZippedDataset(torch.utils.data.Dataset):
     def __init__(self, *components):
-        assert len(components) >= 1
+        assert components
         lengths = [len(c) for c in components]
         assert all(lengths[0] == other for other in lengths[1:]), f"Lengths don't match: {lengths}"
         self.components = components
@@ -76,10 +76,7 @@ class EncDecModel(torch.nn.Module):
         for enc_state, (enc_input, dec_output) in zip(enc_states, batch):
             loss = self.decoder.compute_loss(enc_input, dec_output, enc_state, debug)
             losses.append(loss)
-        if debug:
-            return losses
-        else:
-            return torch.mean(torch.stack(losses, dim=0), dim=0)
+        return losses if debug else torch.mean(torch.stack(losses, dim=0), dim=0)
 
     def begin_inference(self, orig_item, preproc_item):
         enc_input, _ = preproc_item

@@ -91,22 +91,18 @@ class LookupEmbeddings(torch.nn.Module):
         return all_embs, boundaries
 
     def _compute_boundaries(self, token_lists):
-        # token_lists: list of list of lists
-        # [batch, num descs, desc length]
-        # - each list contains tokens
-        # - each list corresponds to a column name, table name, etc.
-        boundaries = [
-            np.cumsum([0] + [len(token_list) for token_list in token_lists_for_item])
-            for token_lists_for_item in token_lists]
-
-        return boundaries
+        return [
+            np.cumsum(
+                [0] + [len(token_list) for token_list in token_lists_for_item]
+            )
+            for token_lists_for_item in token_lists
+        ]
 
     def _embed_token(self, token, batch_idx):
         if token in self.learnable_words or not self.embedder.contains(token):
             return self.embedding.weight[self.vocab.index(token)]
-        else:
-            emb = self.embedder.lookup(token)
-            return emb.to(self._device)
+        emb = self.embedder.lookup(token)
+        return emb.to(self._device)
 
     def forward(self, token_lists):
         # token_lists: list of list of lists
@@ -215,7 +211,7 @@ class BiLSTM(torch.nn.Module):
                 new_boundaries.append(new_boundaries[-1] + 1)
             else:
                 seq_emb = output
-                new_boundaries.append(new_boundaries[-1] + output.shape[0])
+                new_boundaries.append(new_boundaries[-1] + seq_emb.shape[0])
             outputs.append(seq_emb)
 
         return torch.cat(outputs, dim=0), new_boundaries

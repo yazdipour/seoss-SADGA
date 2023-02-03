@@ -106,11 +106,10 @@ class TreeTraversal:
             handler_name = TreeTraversal.Handler.handlers[self.cur_item.state]
             handler = getattr(self, handler_name)
             choices, continued = handler(last_choice)
-            if continued:
-                last_choice = choices
-                continue
-            else:
+            if not continued:
                 return choices
+            last_choice = choices
+            continue
 
     def update_using_last_choice(
             self, last_choice, extra_choice_info, attention_offset
@@ -281,7 +280,7 @@ class TreeTraversal:
 
     @Handler.register_handler(State.LIST_LENGTH_INQUIRE)
     def process_list_length_inquire(self, last_choice):
-        list_type = self.cur_item.node_type + "*"
+        list_type = f"{self.cur_item.node_type}*"
         output, self.recurrent_state, rule_logits = self.model.apply_rule(
             list_type,
             self.recurrent_state,
@@ -304,13 +303,13 @@ class TreeTraversal:
     def process_list_length_apply(self, last_choice):
         list_type, num_children = self.model.preproc.all_rules[last_choice]
         elem_type = self.cur_item.node_type
-        assert list_type == elem_type + "*"
+        assert list_type == f"{elem_type}*"
 
         child_node_type = elem_type
         if elem_type in self.model.ast_wrapper.sum_types:
             child_state = TreeTraversal.State.SUM_TYPE_INQUIRE
             if self.model.preproc.use_seq_elem_rules:
-                child_node_type = elem_type + "_seq_elem"
+                child_node_type = f"{elem_type}_seq_elem"
         elif elem_type in self.model.ast_wrapper.product_types:
             child_state = TreeTraversal.State.CHILDREN_INQUIRE
         elif elem_type == "identifier":
@@ -321,7 +320,7 @@ class TreeTraversal:
         else:
             raise ValueError(f"Unable to handle seq field type {elem_type}")
 
-        for i in range(num_children):
+        for _ in range(num_children):
             self.queue = self.queue.append(
                 TreeTraversal.QueueItem(
                     item_id=self.next_item_id,
@@ -387,19 +386,11 @@ class TreeTraversal:
 
     @Handler.register_handler(State.POINTER_APPLY)
     def process_pointer_apply(self, last_choice):
-        if self.pop():
-            last_choice = None
-            return last_choice, True
-        else:
-            return None, False
+        return (None, True) if self.pop() else (None, False)
 
     @Handler.register_handler(State.NODE_FINISHED)
     def process_node_finished(self, last_choice):
-        if self.pop():
-            last_choice = None
-            return last_choice, True
-        else:
-            return None, False
+        return (None, True) if self.pop() else (None, False)
 
     def rule_choice(self, node_type, rule_logits):
         raise NotImplementedError

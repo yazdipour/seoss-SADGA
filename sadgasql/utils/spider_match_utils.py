@@ -4,7 +4,7 @@ import os
 import nltk.corpus
 import sqlite3
 STOPWORDS = set(nltk.corpus.stopwords.words('english'))
-PUNKS = set(a for a in string.punctuation)
+PUNKS = set(string.punctuation)
 
 
 # schema linking, similar to IRNet
@@ -23,21 +23,18 @@ def compute_schema_linking(question, column, table):
     def exact_match(x_list, y_list):
         x_str = " ".join(x_list)
         y_str = " ".join(y_list)
-        if x_str == y_str:
-            return True
-        else:
-            return False
+        return x_str == y_str
 
-    q_col_match = dict()
-    q_tab_match = dict()
+    q_col_match = {}
+    q_tab_match = {}
 
-    col_id2list = dict()
+    col_id2list = {}
     for col_id, col_item in enumerate(column):
         if col_id == 0:
             continue
         col_id2list[col_id] = col_item
 
-    tab_id2list = dict()
+    tab_id2list = {}
     for tab_id, tab_item in enumerate(table):
         tab_id2list[tab_id] = tab_item
 
@@ -47,7 +44,7 @@ def compute_schema_linking(question, column, table):
         for i in range(len(question) - n + 1):
             n_gram_list = question[i:i + n]
             n_gram = " ".join(n_gram_list)
-            if len(n_gram.strip()) == 0:
+            if not n_gram.strip():
                 continue
             # exact match case
             for col_id in col_id2list:
@@ -89,10 +86,7 @@ def compute_cell_value_linking(tokens, schema):
         try:
             cursor.execute(p_str)
             p_res = cursor.fetchall()
-            if len(p_res) == 0:
-                return False
-            else:
-                return p_res
+            return False if len(p_res) == 0 else p_res
         except Exception as e:
             return False
 
@@ -141,15 +135,12 @@ def compute_cell_value_linking_bart(tokens, schema, db_dir):
         try:
             cursor.execute(p_str)
             p_res = cursor.fetchall()
-            if len(p_res) == 0:
-                return False
-            else:
-                return p_res
+            return False if len(p_res) == 0 else p_res
         except:
             return False
 
     db_name = schema.db_id
-    db_path = os.path.join(db_dir, db_name, db_name + '.sqlite')
+    db_path = os.path.join(db_dir, db_name, f'{db_name}.sqlite')
 
     num_date_match = {}
     cell_match = {}
